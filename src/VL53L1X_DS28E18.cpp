@@ -1,5 +1,82 @@
 #include "VL53L1X_DS28E18.h"
 
+namespace {
+// DS28E18 "Read Sequencer" response payload seems to be capped (commonly 18 bytes payload),
+// which makes it unreliable to read back the entire sequencer program and parse it.
+//
+// Instead, we read only the bytes that the DS28E18 overwrote (the dummy 0xFF bytes that
+// follow SEQ_CMD_READ/SEQ_CMD_READ_NACK) since those are exactly the I2C read data bytes.
+static bool readSequencerBytesChunked(DS28E18 &ds, uint16_t addr, uint8_t *out, uint16_t len)
+{
+    if (!out || len == 0) return false;
+
+    // Conservative payload chunk size. From real logs, DS28E18 often returns 0x13 (19) total bytes,
+    // which is 1 result byte + 18 payload bytes.
+    static constexpr uint16_t MaxPayload = 18;
+
+    uint16_t written = 0;
+    while (written < len)
+    {
+        uint16_t chunk = len - written;
+        if (chunk > MaxPayload) chunk = MaxPayload;
+
+        uint8_t raw[1 + MaxPayload];
+        uint16_t rawLen = 0;
+        if (!ds.readSequencer(addr + written, raw, chunk, rawLen)) return false;
+        if (rawLen < 1) return false;
+
+        // raw[0] is 0xAA (result). Following bytes are payload (up to chunk bytes).
+        uint16_t payload = rawLen - 1;
+        if (payload == 0) return false;
+
+        // If device returned fewer bytes than requested, still copy what we got.
+        if (payload > chunk) payload = chunk;
+        memcpy(out + written, raw + 1, payload);
+        written += payload;
+
+        if (payload < chunk) return false; // truncated unexpectedly
+    }
+    return true;
+}
+
+static bool readI2CReadDataFromExecutedSequencer(
+    DS28E18 &ds,
+    const uint8_t *seqBuf,
+    uint16_t seqLen,
+    uint8_t *out,
+    uint16_t outLen)
+{
+    if (!seqBuf || seqLen == 0 || !out || outLen == 0) return false;
+
+    uint16_t outIdx = 0;
+    for (uint16_t i = 0; i + 1 < seqLen && outIdx < outLen;)
+    {
+        uint8_t op = seqBuf[i];
+        if (op != SEQ_CMD_READ && op != SEQ_CMD_READ_NACK)
+        {
+            i++;
+            continue;
+        }
+
+        uint8_t len = seqBuf[i + 1];
+        uint16_t dummyStart = i + 2; // DS28E18 overwrites these dummy bytes with read data
+        if (dummyStart + len > seqLen) return false;
+
+        // Read back this dummy segment directly from sequencer SRAM.
+        uint16_t remaining = outLen - outIdx;
+        uint16_t take = len;
+        if (take > remaining) take = remaining;
+
+        if (!readSequencerBytesChunked(ds, dummyStart, out + outIdx, take)) return false;
+        outIdx += take;
+
+        i = dummyStart + len; // advance past this read block
+    }
+
+    return outIdx == outLen;
+}
+} // namespace
+
 // ---- Constructors ----
 
 VL53L1X_DS28E18::VL53L1X_DS28E18(DS28E18 &ds28e18_instance, uint8_t i2cAddr)
@@ -97,23 +174,9 @@ uint8_t VL53L1X_DS28E18::readReg(uint16_t reg) {
     uint8_t result;
     if (!ds.runSequencer(0, seq.getLength(), result)) return 0;
 
-    // DS28E18 Read Packet Layout with 2-byte Reg Write:
-    // [0] Result
-    // [1] Start
-    // [2-6] Write Pkt (0xE3, Len=3, Addr|0, regHI, regLO)
-    // [7] Stop
-    // [8] Start
-    // [9-11] Write Addr Read (0xE3, 0x01, Addr|1)
-    // [12-13] Read Op (0xD3, 0x01)
-    // [14] DATA
-    // [15] Stop
-    uint16_t dataOffset = 14;
-
-    uint8_t rawData[20];
-    uint16_t readLen = 0;
-    if (!ds.readSequencer(0, rawData, seq.getLength(), readLen)) return 0;
-
-    return rawData[dataOffset];
+    uint8_t b = 0;
+    if (!readI2CReadDataFromExecutedSequencer(ds, seq.getBuffer(), seq.getLength(), &b, 1)) return 0;
+    return b;
 }
 
 uint16_t VL53L1X_DS28E18::readReg16Bit(uint16_t reg) {
@@ -133,13 +196,9 @@ uint16_t VL53L1X_DS28E18::readReg16Bit(uint16_t reg) {
     uint8_t result;
     if (!ds.runSequencer(0, seq.getLength(), result)) return 0;
 
-    uint16_t dataOffset = 14;
-
-    uint8_t rawData[22];
-    uint16_t readLen = 0;
-    if (!ds.readSequencer(0, rawData, seq.getLength(), readLen)) return 0;
-
-    return ((uint16_t)rawData[dataOffset] << 8) | rawData[dataOffset + 1];
+    uint8_t b[2] = {0, 0};
+    if (!readI2CReadDataFromExecutedSequencer(ds, seq.getBuffer(), seq.getLength(), b, 2)) return 0;
+    return ((uint16_t)b[0] << 8) | b[1];
 }
 
 uint32_t VL53L1X_DS28E18::readReg32Bit(uint16_t reg) {
@@ -159,16 +218,12 @@ uint32_t VL53L1X_DS28E18::readReg32Bit(uint16_t reg) {
     uint8_t result;
     if (!ds.runSequencer(0, seq.getLength(), result)) return 0;
 
-    uint16_t dataOffset = 14;
-
-    uint8_t rawData[24];
-    uint16_t readLen = 0;
-    if (!ds.readSequencer(0, rawData, seq.getLength(), readLen)) return 0;
-
-    return ((uint32_t)rawData[dataOffset] << 24) |
-           ((uint32_t)rawData[dataOffset + 1] << 16) |
-           ((uint16_t)rawData[dataOffset + 2] << 8) |
-           rawData[dataOffset + 3];
+    uint8_t b[4] = {0, 0, 0, 0};
+    if (!readI2CReadDataFromExecutedSequencer(ds, seq.getBuffer(), seq.getLength(), b, 4)) return 0;
+    return ((uint32_t)b[0] << 24) |
+           ((uint32_t)b[1] << 16) |
+           ((uint32_t)b[2] << 8)  |
+           b[3];
 }
 
 // ======================================================================
@@ -191,24 +246,8 @@ bool VL53L1X_DS28E18::readResults() {
     if (!ds.writeSequencer(0, seq.getBuffer(), seq.getLength())) return false;
     uint8_t result;
     if (!ds.runSequencer(0, seq.getLength(), result)) return false;
-
-    // DS28E18 Read Packet Layout with 2-byte Reg Write + 17-byte Read Op:
-    // [0] Result
-    // [1] Start
-    // [2-6] Write Pkt (0xE3, Len=3, Addr|0, regHI, regLO)
-    // [7] Stop
-    // [8] Start
-    // [9-11] Write Addr Read (0xE3, 0x01, Addr|1)
-    // [12-13] Read Op (0xD3, 0x11)  <-- 0x11 is 17 decimal
-    // [14-30] DATA bytes
-    // [31] Stop
-    uint16_t dataOffset = 14;
-
-    uint8_t rawData[40];
-    uint16_t readLen = 0;
-    if (!ds.readSequencer(0, rawData, seq.getLength(), readLen)) return false;
-
-    uint8_t *d = &rawData[dataOffset];
+    uint8_t d[17];
+    if (!readI2CReadDataFromExecutedSequencer(ds, seq.getBuffer(), seq.getLength(), d, 17)) return false;
 
     results.range_status = d[0];
     // d[1] = report_status (not used)
@@ -222,6 +261,30 @@ bool VL53L1X_DS28E18::readResults() {
     results.peak_signal_count_rate_crosstalk_corrected_mcps_sd0 = ((uint16_t)d[15] << 8) | d[16];
 
     return true;
+}
+
+bool VL53L1X_DS28E18::debugReadResultsRaw(uint8_t out17[17])
+{
+    if (!out17) return false;
+
+    DS28E18 &ds = activeDS();
+    seq.clear();
+
+    uint16_t reg = VL53L1X_RESULT_RANGE_STATUS;
+    seq.addStart();
+    uint8_t regData[2] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF)};
+    seq.addWrite(address, regData, 2);
+    seq.addStop();
+
+    seq.addStart();
+    seq.addRead(address, 17);
+    seq.addStop();
+
+    if (!ds.writeSequencer(0, seq.getBuffer(), seq.getLength())) return false;
+    uint8_t result;
+    if (!ds.runSequencer(0, seq.getLength(), result)) return false;
+
+    return readI2CReadDataFromExecutedSequencer(ds, seq.getBuffer(), seq.getLength(), out17, 17);
 }
 
 // ======================================================================

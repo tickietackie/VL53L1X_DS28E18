@@ -38,7 +38,7 @@
 #define VL53L1X_ALGO_CONSISTENCY_CHECK_TOLERANCE          0x0040
 #define VL53L1X_SYSTEM_THRESH_RATE_HIGH                  0x0050
 #define VL53L1X_SYSTEM_THRESH_RATE_LOW                   0x0052
-#define VL53L1X_DSS_CONFIG_APERTURE_ATTENUATION          0x0054
+#define VL53L1X_DSS_CONFIG_APERTURE_ATTENUATION          0x0057
 #define VL53L1X_RANGE_CONFIG_SIGMA_THRESH                0x0064
 #define VL53L1X_RANGE_CONFIG_MIN_COUNT_RATE_RTN_LIMIT    0x0066
 
@@ -49,7 +49,7 @@
 #define VL53L1X_PHASECAL_CONFIG_TIMEOUT_MACROP           0x004B
 #define VL53L1X_MM_CONFIG_TIMEOUT_MACROP_A               0x005A
 #define VL53L1X_RANGE_CONFIG_TIMEOUT_MACROP_A            0x005E
-#define VL53L1X_MM_CONFIG_TIMEOUT_MACROP_B               0x0060  // note: shares addr
+#define VL53L1X_MM_CONFIG_TIMEOUT_MACROP_B               0x005C
 #define VL53L1X_RANGE_CONFIG_TIMEOUT_MACROP_B            0x0061
 
 // -- Dynamic Config --
@@ -159,6 +159,13 @@ public:
     uint16_t getSpadCount() { return results.dss_actual_effective_spads_sd0; }
 
     uint8_t getDeviceIndex() const { return deviceIndex; }
+
+    // ---- Debug helpers (raw register/result dumps) ----
+    // These bypass range-status interpretation and are meant for comparing
+    // DS28E18 reads against direct-I2C (e.g. Pololu) reads.
+    uint8_t debugReadReg8(uint16_t reg) { return readReg(reg); }
+    uint16_t debugReadReg16(uint16_t reg) { return readReg16Bit(reg); }
+    bool debugReadResultsRaw(uint8_t out17[17]);
 
 private:
     DS28E18 *dsPtr = nullptr;
