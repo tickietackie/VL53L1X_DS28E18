@@ -1,24 +1,22 @@
-# Proximity_DS28E18
+# VL53L1X_DS28E18
 
-Arduino library to access I2C proximity and range sensors through the DS28E18 1-Wire ↔ I2C bridge. This package adapts popular sensor drivers to run over a DS28E18 device (single or many on a OneWireBus) so you can place I2C sensors remotely on a simple 1-Wire network.
+Arduino library to access the VL53L1X time-of-flight distance sensor through the DS28E18 1-Wire ↔ I2C bridge. Adapts the VL53L1X driver to run over a DS28E18 device (single or many on a OneWireBus) so you can place the sensor remotely on a simple 1-Wire network.
 
 Overview
 - Bridge: DS28E18 1-Wire to I2C bridge (requires a 1-Wire master such as Adafruit DS248x)
-- Supported sensors in this repository:
-  - `VCNL4040` — proximity + ambient light sensor (VCNL4040_DS28E18)
-  - `VL53L1X` — ST time-of-flight distance sensor (VL53L1X_DS28E18)
+- Sensor: `VL53L1X` — ST time-of-flight distance sensor
 - Modes: single DS28E18 device or multiple devices via `OneWireBus`
 
 Highlights
-- Use remote I2C sensors over a 1-Wire bus (simple wiring, long runs)
-- Full feature access for each supported sensor (configuration, measurement modes, interrupts)
-- Example sketches for each sensor in `example/`
+- Use a remote VL53L1X over a 1-Wire bus (simple wiring, long runs)
+- Full feature access: distance modes, timing budget, continuous and single-shot ranging
+- Example sketches in `example/`
 
 Requirements
 - Arduino-compatible MCU
 - Adafruit DS248x (or compatible) 1-Wire master
 - DS28E18 1-Wire-to-I2C bridge
-- Sensor(s): VCNL4040 and/or VL53L1X
+- VL53L1X sensor
 
 Installation
 
@@ -28,7 +26,7 @@ Add to `platformio.ini`:
 
 ```ini
 lib_deps =
-  https://github.com/DanielSart/VCNL4040_DS28E18.git
+  https://github.com/tickietackie/VL53L1X_DS28E18.git
   https://github.com/DanielSart/DS28E18_DS2482_Library.git
   adafruit/Adafruit DS248x @ ^1.0.1
 ```
@@ -44,10 +42,10 @@ Quick Start — Common Setup
 Basic wiring (I2C master → DS2482 → 1-Wire → DS28E18 → I2C sensor):
 
 ```
-MCU ──I2C──> DS2482 ──1-Wire──> DS28E18 ──I2C──> <sensor>
+MCU ──I2C──> DS2482 ──1-Wire──> DS28E18 ──I2C──> VL53L1X
 ```
 
-Common initialization (example pattern used by both sensor examples):
+Common initialization:
 
 ```cpp
 #include <Wire.h>
@@ -67,47 +65,6 @@ void setup_common() {
 }
 ```
 
-VCNL4040 — Proximity & Ambient Light
-------------------------------------
-
-Features
-- Proximity (0–65535), configurable integration time and resolution
-- Ambient light (ALS) and white channel readings
-- LED drive and duty cycle control, interrupt thresholds and persistence
-
-Quick Start (VCNL4040)
-
-```cpp
-#include "VCNL4040_DS28E18.h"
-
-VCNL4040_DS28E18 vcnl4040(ds28e18);
-
-void setup() {
-  setup_common();
-  if (vcnl4040.begin()) {
-    Serial.println("VCNL4040 Ready!");
-    vcnl4040.powerOnAmbient();
-  }
-}
-
-void loop() {
-  Serial.print("Prox: ");
-  Serial.print(vcnl4040.getProximity());
-  Serial.print(" ALS: ");
-  Serial.println(vcnl4040.getAmbient());
-  delay(100);
-}
-```
-
-API (selected)
-- `begin()` — Initialize and configure defaults
-- `isConnected()` / `getID()` — Device presence and ID (0x0186)
-- `getProximity()` / `powerOnProximity()` / `setProxIntegrationTime()`
-- `getAmbient()` / `powerOnAmbient()` / `setAmbientIntegrationTime()`
-- `getWhite()` / `enableWhiteChannel()`
-
-See `src/VCNL4040_DS28E18.h` for the complete API.
-
 VL53L1X — Time-of-Flight Distance Sensor
 ----------------------------------------
 
@@ -116,7 +73,7 @@ Features
 - Continuous and single-shot ranging modes
 - Timing budget and inter-measurement period configuration
 
-Quick Start (VL53L1X)
+Quick Start
 
 ```cpp
 #include "VL53L1X_DS28E18.h"
@@ -150,8 +107,6 @@ API (selected)
 See `src/VL53L1X_DS28E18.h` for the complete API.
 
 Examples
-- VCNL4040 example: [example/VCNL4040_DS28E18_Example/](example/VCNL4040_DS28E18_Example)
-- VCNL4040 simple example: [example/VCNL4040_DS28E18_Simple_Example/](example/VCNL4040_DS28E18_Simple_Example)
 - VL53L1X example: [example/VL53L1X_DS28E18_Example/](example/VL53L1X_DS28E18_Example)
 
 Contributing
